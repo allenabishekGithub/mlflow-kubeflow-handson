@@ -1,0 +1,7 @@
+# Recreate the Python environment with requirements.txt.
+.venv
+venv
+
+# Python-generated cache files.
+__pycache__/
+*.py[cod]

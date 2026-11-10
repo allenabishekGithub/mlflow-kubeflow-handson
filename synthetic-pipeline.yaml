@@ -1,0 +1,236 @@
+# PIPELINE DEFINITION
+# Name: synthetic-ml-training-pipeline
+# Inputs:
+#    c: float [Default: 1.0]
+# Outputs:
+#    Output: float
+components:
+  comp-evaluate-model:
+    executorLabel: exec-evaluate-model
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-generate-data:
+    executorLabel: exec-generate-data
+    outputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        c:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-evaluate-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'scikit-learn==1.5.2'\
+          \ 'joblib==1.4.2'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.18.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate_model(dataset: Input[Dataset], model: Input[Model])\
+          \ -> float:\n    \"\"\"Return accuracy on the 120 examples not used for\
+          \ training.\"\"\"\n    import joblib  # Deserialize the dataset and trained\
+          \ estimator.\n    from sklearn.metrics import accuracy_score  # Calculate\
+          \ the fraction of correct predictions.\n\n    X, y = joblib.load(dataset.path)\
+          \  # Load all examples and their true labels.\n    estimator = joblib.load(model.path)\
+          \  # Load the model produced by the training component.\n    accuracy =\
+          \ accuracy_score(y[480:], estimator.predict(X[480:]))  # Compare predictions\
+          \ on examples 480-599 with their labels.\n    print(f\"Model Evaluation\
+          \ accuracy: {accuracy:.4f}\")  # Show the score in the component's logs.\n\
+          \    return float(accuracy)  # Return a plain Python float as this component's\
+          \ scalar output.\n\n"
+        image: python:3.11-slim
+    exec-generate-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - generate_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'scikit-learn==1.5.2'\
+          \ 'joblib==1.4.2'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.18.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef generate_data(dataset: Output[Dataset]):\n    \"\"\"Generate\
+          \ a reproducible synthetic dataset and write it as a pipeline artifact.\"\
+          \"\"\n    import joblib  # Serialize the feature matrix and labels to the\
+          \ component output file.\n    from sklearn.datasets import make_classification\
+          \  # Generate labeled data for a classification task.\n\n    # Create 600\
+          \ examples with 10 features; 6 features carry signal and 2 are redundant.\n\
+          \    X, y = make_classification(\n        n_samples=600,\n        n_features=10,\n\
+          \        n_informative=6,\n        n_redundant=2,\n        random_state=42,\
+          \  # Make data generation repeatable across runs.\n    )\n    joblib.dump((X,\
+          \ y), dataset.path)  # Write both arrays to the Dataset artifact for downstream\
+          \ components.\n\n"
+        image: python:3.11-slim
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'scikit-learn==1.5.2'\
+          \ 'joblib==1.4.2'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.18.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(dataset: Input[Dataset], model: Output[Model], c:\
+          \ float):\n    \"\"\"Train logistic regression on the first 480 examples\
+          \ and save the fitted estimator.\"\"\"\n    import joblib  # Read the input\
+          \ artifact and serialize the trained model.\n    from sklearn.linear_model\
+          \ import LogisticRegression  # Import the classification algorithm.\n\n\
+          \    X, y = joblib.load(dataset.path)  # Load the feature matrix and labels\
+          \ from the upstream component.\n    estimator = LogisticRegression(C=c,\
+          \ max_iter=1000)  # Configure regularization and the solver iteration limit.\n\
+          \    estimator.fit(X[:480], y[:480])  # Fit using the first 480 examples;\
+          \ the remaining examples are held out.\n    joblib.dump(estimator, model.path)\
+          \  # Write the trained estimator to the Model output artifact.\n\n"
+        image: python:3.11-slim
+pipelineInfo:
+  name: synthetic-ml-training-pipeline
+root:
+  dag:
+    outputs:
+      parameters:
+        Output:
+          valueFromParameter:
+            outputParameterKey: Output
+            producerSubtask: evaluate-model
+    tasks:
+      evaluate-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-model
+        dependentTasks:
+        - generate-data
+        - train-model
+        inputs:
+          artifacts:
+            dataset:
+              taskOutputArtifact:
+                outputArtifactKey: dataset
+                producerTask: generate-data
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: model
+                producerTask: train-model
+        taskInfo:
+          name: evaluate-model
+      generate-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-generate-data
+        taskInfo:
+          name: generate-data
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        dependentTasks:
+        - generate-data
+        inputs:
+          artifacts:
+            dataset:
+              taskOutputArtifact:
+                outputArtifactKey: dataset
+                producerTask: generate-data
+          parameters:
+            c:
+              componentInputParameter: c
+        taskInfo:
+          name: train-model
+  inputDefinitions:
+    parameters:
+      c:
+        defaultValue: 1.0
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+  outputDefinitions:
+    parameters:
+      Output:
+        parameterType: NUMBER_DOUBLE
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.18.0
